@@ -15,6 +15,47 @@ import numpy as np
 from scipy.optimize import minimize
 
 
+#%% Pauli Expansion 2x 2
+def PauliExpansion2x2(A):
+	I = np.array([[1,0],[0,1]])
+	X = np.array([[0,1],[1,0]])
+	Y = np.array([[0,-1j],[1j,0]])
+	Z = np.array([[1,0],[0,-1]])
+	a = 4*[0]
+	a[0] = np.trace(np.matmul(A,I))/2
+	a[1] = np.trace(np.matmul(A,X))/2
+	a[2] = np.trace(np.matmul(A,Y))/2
+	a[3] = np.trace(np.matmul(A,Z))/2
+	return a
+
+A = np.array([[2,-1],[-1,2]])
+a= PauliExpansion2x2(A)
+print(a)
+
+#%% Pauli Expansion 4 x 4
+def PauliExpansion4x4(A):
+	I = np.array([[1,0],[0,1]])
+	X = np.array([[0,1],[1,0]])
+	Y = np.array([[0,-1j],[1j,0]])
+	Z = np.array([[1,0],[0,-1]])
+	basis2x2 = [I,X,Y,Z]
+	basis4x4 = 16*[None]
+	count = 0
+	for i in range(4):
+		for j in range(4):
+			basis4x4[count] = np.kron(basis2x2[i],basis2x2[j])
+			count = count+1
+	a = 16*[0]
+	for i in range(16):
+		a[i] = np.trace(np.matmul(A,basis4x4[i]))/4
+
+	return a
+
+A = np.array([[1,0,0,-0.5],[0,1,0,0],[0,0,1,0],[-0.5,0,0,1]])
+a= PauliExpansion4x4(A)
+print(a)
+
+
 #%% Ansatz
 def apply_fixed_ansatz(qubits, parameters):
     for iz in range (0, len(qubits)):

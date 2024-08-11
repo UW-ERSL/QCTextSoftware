@@ -11,7 +11,7 @@ from qiskit import QuantumCircuit, transpile, QuantumRegister, ClassicalRegister
 from IPython.display import display
 from qiskit.quantum_info import Statevector
 from qiskit.circuit.library import HamiltonianGate
-from qiskit.circuit.library import QFT, PhaseEstimation
+from qiskit.circuit.library import QFT, PhaseEstimation, UnitaryGate
 from qiskit_aer import Aer
 import matplotlib.pyplot as plt
 import numpy as np
@@ -42,30 +42,25 @@ psi = Statevector(circuit)
 display(psi.draw('latex'))
 
 
-#%% Single digit QPE with single qubit v
-def myQPE1(A,v,f,lambdaHat):
-	circuit = QuantumCircuit(2,1)
-	circuit.h(0)
-	circuit.prepare_state(Statevector(v),[1],' v')
-	t = -2*np.pi*f/lambdaHat #Note negative
-	U_A = HamiltonianGate(A, time=t,label = 'UA')
-	UControl = U_A.control(1)
-	circuit.append(UControl,[0,1])
-	iqft = QFT(num_qubits=1,inverse=True).to_gate()
-	iqft._name = 'IQFT'
-	circuit.append(iqft, [0])
-	circuit.measure([0], [0]) 
-	circuit.draw('mpl') 
-	counts = simulateCircuit(circuit,nShots=1)
-	return counts
+#%% Schematic
+zeroQubit = QuantumRegister(1, '0')
+vQubit = QuantumRegister(1, 'v')
+circuit = QuantumCircuit(zeroQubit,vQubit) 
+circuit.h(0)
+UMatrix = 1/np.sqrt(2)*np.array([[1,1],[1j,-1j]]) 
+U = UnitaryGate(UMatrix,'U_A')
+UControl = U.control(1)
+circuit.append(UControl,[0,1])
+circuit.draw('mpl') 
+
 
 #%% Single digit QPE with multiple qubits v
-def myQPE2(A,v,f,lambdaHat):
+def myQPESingleBit(A,v,lambdaHat,nShots=1000):
 	n = int(np.log2(v.shape[0]))
 	circuit = QuantumCircuit(n+1,1)
 	circuit.h(0)
 	circuit.prepare_state(Statevector(v),[*range(1, n+1)],'v')
-	t = -2*np.pi*f/lambdaHat #Note negative
+	t = -2*np.pi/lambdaHat #Note negative
 	U_A = HamiltonianGate(A, time=t,label = 'UA')
 	UControl = U_A.control(1) # only 1 control qubit
 	circuit.append(UControl,[*range(0, n+1)])
@@ -73,11 +68,19 @@ def myQPE2(A,v,f,lambdaHat):
 	iqft._name = 'IQFT'
 	circuit.append(iqft, [0])
 	circuit.measure([0], [0]) 
-	return simulateCircuit(circuit,nShots=1)
-
+	counts = simulateCircuit(circuit,nShots)
+	probabilities = np.array([])
+	thetaEstimates = np.array([])
+	countsSorted = {k: v for k, v in sorted(counts.items(), 
+										 key=lambda item: item[1],
+										 reverse=True)}
+	for key in countsSorted:
+		probabilities = np.append(probabilities,countsSorted[key]/nShots)
+		thetaEstimates = np.append(thetaEstimates,int(key, 2)/(2))
+	return [thetaEstimates,probabilities]
 
 #%% Multiple digit QPE with multiple qubits v
-def myQPE3(A,v,f,lambdaHat,m=1):
+def myQPEMultiBit(A,v,lambdaHat,m,nShots=1000):
 	N = v.shape[0]
 	n = int(np.log2(N))
 	phase_qubits = QuantumRegister(m, '\u03B8')
@@ -87,7 +90,7 @@ def myQPE3(A,v,f,lambdaHat,m=1):
 	for i in range(m):
 		circuit.h(i)
 	circuit.prepare_state(Statevector(v),[*range(m, n+m)],'b')
-	t = -2*np.pi*f/lambdaHat #Note negative
+	t = -2*np.pi/lambdaHat #Note negative
 	U_A = HamiltonianGate(A, time=t,label = 'UA')
 	U_A._name = 'UA'
 	for i in range(m):
@@ -98,76 +101,63 @@ def myQPE3(A,v,f,lambdaHat,m=1):
 	iqft._name = 'IQFT'
 	circuit.append(iqft, [*range(0,m)])
 	circuit.measure([*range(0,m)], [*range(0,m)]) 
-	circuit.draw('mpl') 
-	counts = simulateCircuit(circuit,nShots=50)
-	return counts
+	#circuit.draw('mpl') 
+	counts = simulateCircuit(circuit,nShots)
+	countsSorted = {k: v for k, v in sorted(counts.items(), 
+										 key=lambda item: item[1],
+										 reverse=True)}
+	probabilities = np.array([])
+	thetaEstimates = np.array([])
+	for key in countsSorted:
+		probabilities = np.append(probabilities,countsSorted[key]/nShots)
+		thetaEstimates = np.append(thetaEstimates,int(key, 2)/(2**m))
+	return [thetaEstimates,probabilities]
 
-#%% Utility function processCounts for QPE
-def processCounts(counts):
-	# Input:  counts from circuit simulation 
-	# Return: decimal values sorted by descending probability
-	# First sort descending using 2nd item in dictionary
-
-	countsSorted = sorted(counts.items(),
-		key=lambda item: item[1],reverse=True)
-	m = len(countsSorted[0][0]) # length of bit string
-	values = []
-	for i in range(len(countsSorted)):
-		string = countsSorted[i][0]
-		values.append(int(string, 2)/(2**m))
-	return np.array(values)
 
 
 #%% Test cases for QPE
 plt.close('all')
-example = 2
+example = 1
 if (example == 1):
 	A = np.array([[1,0],[0,0.75]])
-	v0 = np.array([1,0])
-	v1 = np.array([0,1])
-	a0 = 1/2
-	a1 = np.sqrt(3)/2
-	v = a0*v0 +  a1*v1
-	f = 0.5
-	lambdaHat = 1
-	m = 2
+	v0 = np.array([0,1])
+	v1 = np.array([1,0])
+	Lambda = [0.75,1]
+	a = [1/np.sqrt(2),1/np.sqrt(2)]
+	a= [1,0]
+	v = a[0]*v0 + a[1]*v1
+	lambdaHat = 2
+	m = 3
 elif (example == 2):
 	A = np.array([[2,-1],[-1,2]])
 	v0 = np.array([1/np.sqrt(2),1/np.sqrt(2)])
 	v1 = np.array([1/np.sqrt(2),-1/np.sqrt(2)])
-	a0 = 1
-	a1 = 0
-	v = a0*v0 +  a1*v1
-	f = 0.5
-	lambdaHat = 3
-	m = 2
+	Lambda = [1,3]
+	a = [1,0]
+	v = a[0]*v0 + a[1]*v1
+	lambdaHat = 6
+	m = 10
 elif (example == 3):
 	A = np.array([[1,0,0,-0.5],[0,1,0,0],[0,0,1,0],[-0.5,0,0,1]])
-	v0 = np.array([1/np.sqrt(2),0,0,-1/np.sqrt(2)])
-	v1 = np.array([1/np.sqrt(2),0,0,1/np.sqrt(2)])
-	v2 = np.array([0,1,0,0])
-	v3 = np.array([0,0,1,0])
-	a = [1/np.sqrt(4),1/np.sqrt(4),1/np.sqrt(4),1/np.sqrt(4)]
-	#a = [1,0,0,0]
+	v0 = np.array([1/np.sqrt(2),0,0,1/np.sqrt(2)])
+	v1 = np.array([0,1,0,0])
+	v2 = np.array([0,0,1,0])
+	v3 = np.array([1/np.sqrt(2),0,0,-1/np.sqrt(2)])
+	Lambda = [0.5,1,1,1.5]
+	#a = [1/np.sqrt(4),1/np.sqrt(4),1/np.sqrt(4),1/np.sqrt(4)]
+	a = [0,0,1,0]
 	v = a[0]*v0 + a[1]*v1 + a[2]*v2 + a[3]*v3
-	f = 0.5
-	lambdaHat = 1.5
-	m = 2
-elif (example == 4):
-	A = np.array([[2,-1,0,0],[-1,2,-1,0],[0,-1,2,-1],[0,0,-1,2]])
-	v = np.random.rand(4)
-	v = v/np.linalg.norm(v)
-	f = 0.5
-	lambdaHat = 4
-	m = 2
+	lambdaHat = 3
+	m = 10
 
-counts = myQPE3(A,v,f,lambdaHat,m=m)	
-print("counts:", counts)
-thetaTilde = processCounts(counts)
+[thetaEstimates,P] = myQPEMultiBit(A,v,lambdaHat,m)	
+print("thetaEstimates:",thetaEstimates)
+print("probabilities:", P)
+thetaTilde = np.sum(thetaEstimates*P)
 print("thetaTilde:", thetaTilde)
-print("EigenvalueTilde:",thetaTilde*lambdaHat/f)
+print("EigenvalueTilde:",thetaTilde*lambdaHat)
 
-#%% Using the Built in QPE
+#%% Using the Built in QFT and PhaseEstimation
 m = 3
 A = np.array([[2,-1,0,0],[-1,2,-1,0],[0,-1,2,-1],[0,0,-1,2]])
 v = np.random.rand(4)
@@ -180,43 +170,3 @@ U_A = HamiltonianGate(A, time=t,label = 'UA')
 iqft = QFT(num_qubits=m,inverse=True).to_gate()
 iqft._name = 'IQFT'
 qpe = PhaseEstimation(m,U_A,iqft)
-
-#%% Pauli Expansion 2x 2
-def PauliExpansion2x2(A):
-	I = np.array([[1,0],[0,1]])
-	X = np.array([[0,1],[1,0]])
-	Y = np.array([[0,-1j],[1j,0]])
-	Z = np.array([[1,0],[0,-1]])
-	a = 4*[0]
-	a[0] = np.trace(np.matmul(A,I))/2
-	a[1] = np.trace(np.matmul(A,X))/2
-	a[2] = np.trace(np.matmul(A,Y))/2
-	a[3] = np.trace(np.matmul(A,Z))/2
-	return a
-
-A = np.array([[2,-1],[-1,2]])
-a= PauliExpansion2x2(A)
-print(a)
-
-#%% Pauli Expansion 4 x 4
-def PauliExpansion4x4(A):
-	I = np.array([[1,0],[0,1]])
-	X = np.array([[0,1],[1,0]])
-	Y = np.array([[0,-1j],[1j,0]])
-	Z = np.array([[1,0],[0,-1]])
-	basis2x2 = [I,X,Y,Z]
-	basis4x4 = 16*[None]
-	count = 0
-	for i in range(4):
-		for j in range(4):
-			basis4x4[count] = np.kron(basis2x2[i],basis2x2[j])
-			count = count+1
-	a = 16*[0]
-	for i in range(16):
-		a[i] = np.trace(np.matmul(A,basis4x4[i]))/4
-
-	return a
-
-A = np.array([[1,0,0,-0.5],[0,1,0,0],[0,0,1,0],[-0.5,0,0,1]])
-a= PauliExpansion4x4(A)
-print(a)
